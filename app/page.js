@@ -1,65 +1,101 @@
-import Image from "next/image";
+'use client';
+import { useState } from 'react';
+import Search from '@/components/Search';
+import VideoCard from '@/components/VideoCard';
+import RecipeDetails from '@/components/RecipeDetails';
+import SkeletonLoader from '@/components/SkeletonLoader';
 
 export default function Home() {
+  const [query, setQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [data, setData] = useState(null);
+
+  const handleSearch = async (searchQuery) => {
+    setIsLoading(true);
+    setError(null);
+    setData(null);
+    
+    try {
+      const response = await fetch(`/api/recipe?q=${encodeURIComponent(searchQuery)}`);
+      
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'Failed to fetch recipe data');
+      }
+      
+      const result = await response.json();
+      setData(result);
+    } catch (err) {
+      console.error('Search error:', err);
+      setError(err.message || 'An unexpected error occurred while fetching the recipe.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <main className="flex-1 flex flex-col items-center w-full min-h-screen pt-12 md:pt-24 pb-24 px-4 sm:px-6 lg:px-8">
+      {/* Header section */}
+      <div className={`w-full max-w-7xl mx-auto flex flex-col items-center transition-all duration-700 ease-in-out ${data || isLoading ? 'mb-12 md:mb-16' : 'mt-[10vh] md:mt-[20vh] mb-12'}`}>
+        <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-neutral-900 dark:text-white mb-4 text-center">
+          Cookaie.
+        </h1>
+        <p className="text-neutral-500 dark:text-neutral-400 text-center mb-10 max-w-lg">
+          Minimalist culinary data aggregator. Discover recipes and cooking videos in one clean space.
+        </p>
+        
+        <Search 
+          query={query} 
+          setQuery={setQuery} 
+          onSearch={handleSearch} 
+          isLoading={isLoading} 
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.js file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+      </div>
+
+      {/* Error state */}
+      {error && (
+        <div className="w-full max-w-2xl mx-auto p-4 bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400 rounded-xl border border-red-200 dark:border-red-800/50 text-center">
+          <p>{error}</p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      )}
+
+      {/* Loading state */}
+      {isLoading && <SkeletonLoader />}
+
+      {/* Results view */}
+      {data && !isLoading && (
+        <div className="w-full max-w-7xl mx-auto flex flex-col md:flex-row gap-8 lg:gap-12 animate-in fade-in duration-700">
+          
+          {/* Left Column: Videos */}
+          <div className="w-full md:w-[35%] lg:w-[30%] flex flex-col gap-6">
+            <h2 className="text-xl font-semibold px-1">Top Videos</h2>
+            {data.videos && data.videos.length > 0 ? (
+              <div className="flex flex-col gap-6">
+                {data.videos.map((video) => (
+                  <VideoCard key={video.videoId} video={video} />
+                ))}
+              </div>
+            ) : (
+              <div className="p-6 bg-neutral-50 dark:bg-neutral-800/50 rounded-2xl border border-neutral-100 dark:border-neutral-800 text-center text-neutral-500">
+                No videos found for this recipe.
+              </div>
+            )}
+          </div>
+          
+          {/* Right Column: Recipe details */}
+          <div className="w-full md:w-[65%] lg:w-[70%]">
+            {data.recipe ? (
+              <RecipeDetails recipe={data.recipe} />
+            ) : (
+              <div className="p-8 bg-neutral-50 dark:bg-neutral-800/50 rounded-3xl border border-neutral-100 dark:border-neutral-800 text-center text-neutral-500">
+                Could not generate recipe instructions.
+              </div>
+            )}
+          </div>
+          
         </div>
-      </main>
-    </div>
+      )}
+    </main>
   );
 }
