@@ -4,6 +4,7 @@ import Search from '@/components/Search';
 import VideoCard from '@/components/VideoCard';
 import RecipeDetails from '@/components/RecipeDetails';
 import SkeletonLoader from '@/components/SkeletonLoader';
+import InstamartCart from '@/components/InstamartCart';
 
 export default function Home() {
   const [query, setQuery] = useState('');
@@ -84,9 +85,16 @@ export default function Home() {
           </div>
           
           {/* Right Column: Recipe details */}
-          <div className="w-full md:w-[65%] lg:w-[70%]">
+          <div className="w-full md:w-[65%] lg:w-[70%] flex flex-col gap-8">
             {data.recipe ? (
-              <RecipeDetails recipe={data.recipe} />
+              <>
+                <RecipeDetails recipe={data.recipe} />
+                
+                {/* Bento integrations */}
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-2">
+                  <InstamartCart ingredients={data.recipe.ingredients} />
+                </div>
+              </>
             ) : (
               <div className="p-8 bg-neutral-50 dark:bg-neutral-800/50 rounded-3xl border border-neutral-100 dark:border-neutral-800 text-center text-neutral-500">
                 Could not generate recipe instructions.
