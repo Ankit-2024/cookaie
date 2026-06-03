@@ -5,6 +5,8 @@ import VideoCard from '@/components/VideoCard';
 import RecipeDetails from '@/components/RecipeDetails';
 import SkeletonLoader from '@/components/SkeletonLoader';
 import InstamartCart from '@/components/InstamartCart';
+import Link from 'next/link';
+import { Settings } from 'lucide-react';
 
 export default function Home() {
   const [query, setQuery] = useState('');
@@ -18,7 +20,20 @@ export default function Home() {
     setData(null);
     
     try {
-      const response = await fetch(`/api/recipe?q=${encodeURIComponent(searchQuery)}`);
+      let dietary = 'None';
+      let allergies = '';
+      try {
+        const prefs = JSON.parse(localStorage.getItem('cookaie_prefs') || '{}');
+        if (prefs.dietaryBase) dietary = prefs.dietaryBase;
+        if (prefs.allergies) allergies = prefs.allergies;
+      } catch(e){}
+
+      const url = new URL('/api/recipe', window.location.origin);
+      url.searchParams.append('q', searchQuery);
+      if (dietary !== 'None') url.searchParams.append('dietary', dietary);
+      if (allergies) url.searchParams.append('allergies', allergies);
+
+      const response = await fetch(url.toString());
       
       if (!response.ok) {
         const errData = await response.json();
@@ -38,6 +53,11 @@ export default function Home() {
   return (
     <main className="flex-1 flex flex-col items-center w-full min-h-screen pt-12 md:pt-24 pb-24 px-4 sm:px-6 lg:px-8">
       {/* Header section */}
+      <div className="absolute top-6 right-6 md:top-8 md:right-8">
+        <Link href="/settings" className="p-2.5 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-full flex items-center justify-center text-neutral-500 hover:text-neutral-900 dark:hover:text-white shadow-sm transition-all hover:shadow-md">
+          <Settings className="w-5 h-5" />
+        </Link>
+      </div>
       <div className={`w-full max-w-7xl mx-auto flex flex-col items-center transition-all duration-700 ease-in-out ${data || isLoading ? 'mb-12 md:mb-16' : 'mt-[10vh] md:mt-[20vh] mb-12'}`}>
         <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-neutral-900 dark:text-white mb-4 text-center">
           Cookaie.

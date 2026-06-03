@@ -7,6 +7,8 @@ const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 export async function GET(request) {
   const searchParams = request.nextUrl.searchParams;
   const query = searchParams.get('q');
+  const dietary = searchParams.get('dietary') || 'None';
+  const allergies = searchParams.get('allergies') || 'None';
 
   if (!query) {
     return NextResponse.json({ error: 'Query parameter "q" is required' }, { status: 400 });
@@ -16,7 +18,7 @@ export async function GET(request) {
     // Execute YouTube and Gemini requests concurrently
     const [youtubeResult, recipeResult] = await Promise.allSettled([
       fetchYouTubeVideos(query),
-      generateRecipe(query)
+      generateRecipe(query, dietary, allergies)
     ]);
 
     let responseData = {
@@ -74,25 +76,37 @@ async function fetchYouTubeVideos(query) {
   }));
 }
 
-async function generateRecipe(query) {
+async function generateRecipe(query, dietary, allergies) {
   if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'your_gemini_api_key_here') {
     console.warn('GEMINI_API_KEY is not set or invalid. Returning mock recipe.');
     return getMockRecipe(query);
   }
 
-  const prompt = `Act as a professional chef. Provide a recipe for "${query}".
-Return ONLY a strictly formatted JSON object with the following structure, with no markdown formatting or extra text:
+  const prompt = `You are an expert culinary architect and supply chain mapper. Your job is to take a user's food query and output a STRICT JSON object representing the recipe.
+
+USER CONTEXT:
+The user is strictly: ${dietary}. 
+EXCLUDE THESE INGREDIENTS: ${allergies}.
+
+CRITICAL INSTRUCTIONS FOR INGREDIENTS:
+1. Translate abstract measurements into standard Indian retail packaging (e.g., instead of "3 onions", output "1kg Red Onions". Instead of "a pinch of salt", output "1 standard pack iodized salt").
+2. Be highly specific with proteins and produce (e.g., "500g bone-in chicken curry cut", not just "chicken").
+3. Do not include markdown formatting like \`\`\`json in your response. Return ONLY the raw JSON string.
+
+EXPECTED SCHEMA:
 {
-  "foodItem": "string (name of the dish)",
-  "prepTime": "string (e.g., '15 mins')",
-  "cookTime": "string (e.g., '45 mins')",
+  "foodItem": "string",
+  "prepTime": "string",
+  "cookTime": "string",
   "ingredients": [
-    { "item": "string", "amount": "string" }
+    { "item": "string (Specific retail name)", "amount": "string (Retail unit like 500g, 1kg, 1 tray)" }
   ],
   "instructions": [
     { "step": 1, "action": "string" }
   ]
-}`;
+}
+
+Dish to generate: "${query}"`;
 
   try {
     const response = await ai.models.generateContent({
