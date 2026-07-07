@@ -89,9 +89,10 @@ The user is strictly: ${dietary}.
 EXCLUDE THESE INGREDIENTS: ${allergies}.
 
 CRITICAL INSTRUCTIONS FOR INGREDIENTS:
-1. Translate abstract measurements into standard Indian retail packaging (e.g., instead of "3 onions", output "1kg Red Onions". Instead of "a pinch of salt", output "1 standard pack iodized salt").
-2. Be highly specific with proteins and produce (e.g., "500g bone-in chicken curry cut", not just "chicken").
-3. Do not include markdown formatting like \`\`\`json in your response. Return ONLY the raw JSON string.
+1. If the user's prompt is NOT related to food, cooking, or recipes (e.g., asking for code, math, or general knowledge), you must reject the request. Do not generate a recipe structure. Instead, return EXACTLY this JSON: { "isError": true, "message": "Keep it strictly culinary. I cannot cook that for you." }
+2. Translate abstract measurements into standard Indian retail packaging (e.g., instead of "3 onions", output "1kg Red Onions". Instead of "a pinch of salt", output "1 standard pack iodized salt").
+3. Be highly specific with proteins and produce (e.g., "500g bone-in chicken curry cut", not just "chicken").
+4. Do not include markdown formatting like \`\`\`json in your response. Return ONLY the raw JSON string.
 
 EXPECTED SCHEMA:
 {

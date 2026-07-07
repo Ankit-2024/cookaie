@@ -1,25 +1,63 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Search from '@/components/Search';
 import VideoCard from '@/components/VideoCard';
 import RecipeDetails from '@/components/RecipeDetails';
 import SkeletonLoader from '@/components/SkeletonLoader';
 import InstamartCart from '@/components/InstamartCart';
+import RecipeHistory from '@/components/RecipeHistory';
 import Link from 'next/link';
-import { Settings } from 'lucide-react';
+import { Settings, AlertTriangle } from 'lucide-react';
 
 export default function Home() {
   const [query, setQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [jailbreakError, setJailbreakError] = useState(null);
   const [data, setData] = useState(null);
+  const [history, setHistory] = useState([]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('cookaie_history');
+      if (stored) setHistory(JSON.parse(stored));
+    } catch(e) {}
+  }, []);
+
+  const saveToHistory = (resultData) => {
+    setHistory(prev => {
+      const newEntry = {
+        id: Math.random().toString(36).substring(2, 9),
+        timestamp: Date.now(),
+        data: resultData
+      };
+      
+      const filtered = prev.filter(item => 
+        item.data.recipe && resultData.recipe && 
+        item.data.recipe.foodItem.toLowerCase() !== resultData.recipe.foodItem.toLowerCase()
+      );
+      
+      const updated = [newEntry, ...filtered].slice(0, 5);
+      localStorage.setItem('cookaie_history', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const handleRestoreRecipe = (restoredData) => {
+    setData(restoredData);
+    setJailbreakError(null);
+    setError(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const handleSearch = async (searchQuery) => {
     setIsLoading(true);
     setError(null);
+    setJailbreakError(null);
     setData(null);
     
     try {
+      // 1. Read settings from localStorage
       let dietary = 'None';
       let allergies = '';
       try {
@@ -41,7 +79,15 @@ export default function Home() {
       }
       
       const result = await response.json();
+
+      // Check for prompt injection guardrail block
+      if (result.recipe && result.recipe.isError) {
+        setJailbreakError(result.recipe.message);
+        return;
+      }
+
       setData(result);
+      saveToHistory(result);
     } catch (err) {
       console.error('Search error:', err);
       setError(err.message || 'An unexpected error occurred while fetching the recipe.');
@@ -81,6 +127,22 @@ export default function Home() {
         </div>
       )}
 
+      {/* Jailbreak Guardrail Error state */}
+      {jailbreakError && (
+        <div className="w-full max-w-2xl mx-auto mt-4 p-6 sm:p-8 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/50 rounded-3xl flex flex-col items-center text-center gap-3 shadow-sm animate-in fade-in zoom-in duration-300">
+          <AlertTriangle className="w-10 h-10 text-amber-500" />
+          <h2 className="text-xl font-bold text-amber-900 dark:text-amber-500">Not on the Menu!</h2>
+          <p className="text-amber-700 dark:text-amber-400 font-medium">{jailbreakError}</p>
+        </div>
+      )}
+
+      {/* Idle State / History */}
+      {!data && !isLoading && history.length > 0 && !jailbreakError && (
+        <div className="w-full max-w-2xl mx-auto animate-in fade-in duration-700">
+          <RecipeHistory history={history} onSelectRecipe={handleRestoreRecipe} />
+        </div>
+      )}
+
       {/* Loading state */}
       {isLoading && <SkeletonLoader />}
 
@@ -113,6 +175,9 @@ export default function Home() {
                 {/* Bento integrations */}
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-2">
                   <InstamartCart ingredients={data.recipe.ingredients} />
+                  {history.length > 0 && (
+                    <RecipeHistory history={history} onSelectRecipe={handleRestoreRecipe} />
+                  )}
                 </div>
               </>
             ) : (
