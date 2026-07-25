@@ -1,0 +1,46 @@
+# ─── Dependencies ─────────────────────────────────────────────────────────────
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ─── Next.js build output ────────────────────────────────────────────────────
+.next
+out
+build
+
+# ─── Environment secrets (injected at runtime, never baked into image) ───────
+.env
+.env.*
+!.env.example
+
+# ─── Version control & IDE ───────────────────────────────────────────────────
+.git
+.gitignore
+.vscode
+.idea
+*.swp
+*.swo
+
+# ─── OS artifacts ────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── Docker itself ───────────────────────────────────────────────────────────
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# ─── Documentation & CI (not needed in image) ───────────────────────────────
+README.md
+CLAUDE.md
+AGENTS.md
+LICENSE
+.github
+.agents
+
+# ─── Testing & tooling ──────────────────────────────────────────────────────
+coverage
+.eslintcache
+*.tsbuildinfo

@@ -1,0 +1,54 @@
+// ─── Prisma Schema — Cookaie ─────────────────────────────────────────────────
+// Serverless PostgreSQL via Prisma ORM (v7).
+//
+// In Prisma 7, the connection URL is configured in `prisma.config.ts`
+// (not in this file). The datasource block only declares the provider.
+//
+// Run `npx prisma db push` to sync this schema with your database.
+// Run `npx prisma generate` to regenerate the Prisma Client after changes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Recipe ──────────────────────────────────────────────────────────────────
+// Stores the full Gemini-generated recipe alongside YouTube video results.
+// JSON columns preserve the exact response shape without over-normalizing
+// write-once, read-many data.
+
+model Recipe {
+  id           String     @id @default(cuid())
+  title        String     // Gemini's recipe.foodItem
+  prepTime     String?    // e.g. "20 mins"
+  cookTime     String?    // e.g. "30 mins"
+  ingredients  Json       // Array of { item: string, amount: string }
+  instructions Json       // Array of { step: number, action: string }
+  videos       Json?      // YouTube results [{ videoId, title, channelTitle, thumbnailUrl }]
+  createdAt    DateTime   @default(now())
+
+  cartItems    CartItem[] // One-to-many: ingredients that were added to cart
+
+  @@index([createdAt(sort: Desc)]) // Optimize history queries (most recent first)
+}
+
+// ─── CartItem ────────────────────────────────────────────────────────────────
+// Tracks which ingredients were carted for a given recipe.
+// Enables future analytics: most-carted ingredients, cost trends, etc.
+
+model CartItem {
+  id             String   @id @default(cuid())
+  recipeId       String
+  recipe         Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  normalizedName String   // SKU-matched ingredient name (e.g. "chicken")
+  originalQuery  String?  // Raw string from Gemini (e.g. "500g bone-in chicken curry cut")
+  price          Float    // Price at time of carting (INR)
+  quantity       Int      @default(1)
+  createdAt      DateTime @default(now())
+
+  @@index([recipeId])
+}

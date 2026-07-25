@@ -1,0 +1,168 @@
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  Cookaie — CI/CD Pipeline                                                  ║
+# ║  GitHub Actions · Node 20 · Docker multi-stage build                       ║
+# ║  Cloud-agnostic: route to GCP, AWS, Docker Hub, or any OCI registry        ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+name: CI/CD Pipeline
+
+# ─── Trigger ──────────────────────────────────────────────────────────────────
+# Runs on every push to `main`. Pull-request builds can be added later
+# by uncommenting the `pull_request` block.
+on:
+  push:
+    branches: [main]
+  # pull_request:
+  #   branches: [main]
+
+# ─── Global Defaults ─────────────────────────────────────────────────────────
+env:
+  NODE_VERSION: '20'                      # Must match Dockerfile base image
+  REGISTRY: ${{ secrets.REGISTRY_URL }}   # e.g. ghcr.io, gcr.io, 123456.dkr.ecr.us-east-1.amazonaws.com
+  IMAGE_NAME: cookaie                     # Repository / image name
+
+# ─── Permissions ──────────────────────────────────────────────────────────────
+# Least-privilege: only allow reading repo contents and writing packages
+# (for GHCR). Expand per-job if needed.
+permissions:
+  contents: read
+  packages: write
+
+# ══════════════════════════════════════════════════════════════════════════════
+# JOBS
+# ══════════════════════════════════════════════════════════════════════════════
+jobs:
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Job 1: Build & Test
+  # Installs dependencies, runs the linter, and verifies the production build.
+  # This job gates the Docker image build — nothing ships if tests fail.
+  # ────────────────────────────────────────────────────────────────────────────
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Node.js Setup ────────────────────────────────────────────────────
+      # Uses the official setup-node action with npm dependency caching
+      # to speed up subsequent runs.
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      # ── Dependency Installation ──────────────────────────────────────────
+      # `npm ci` performs a clean, deterministic install from the lockfile.
+      # It is faster than `npm install` and prevents accidental upgrades.
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Lint ─────────────────────────────────────────────────────────────
+      # Runs ESLint to catch code quality issues before they reach prod.
+      - name: Run linter
+        run: npm run lint
+
+      # ── Production Build ─────────────────────────────────────────────────
+      # Validates that the Next.js standalone build compiles without errors.
+      # This catches type errors, missing imports, and broken page generation.
+      - name: Build production bundle
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Job 2: Docker Image Build & Push
+  # Only runs after build-and-test succeeds. Builds the multi-stage Docker
+  # image and pushes it to the configured container registry.
+  #
+  # REQUIRED GITHUB SECRETS (set in repo Settings → Secrets → Actions):
+  #   REGISTRY_URL       – Registry hostname
+  #                        Examples:
+  #                          Docker Hub:  docker.io
+  #                          GCP:         gcr.io  (or region-docker.pkg.dev)
+  #                          AWS ECR:     123456789.dkr.ecr.us-east-1.amazonaws.com
+  #                          GHCR:        ghcr.io
+  #   REGISTRY_USERNAME  – Registry login username
+  #                        (for GHCR, use ${{ github.actor }})
+  #   REGISTRY_PASSWORD  – Registry login password / token
+  #                        (for GHCR, use a PAT or ${{ secrets.GITHUB_TOKEN }})
+  # ────────────────────────────────────────────────────────────────────────────
+  docker-build-push:
+    name: Docker Build & Push
+    runs-on: ubuntu-latest
+    needs: build-and-test                 # Only run if tests pass
+    timeout-minutes: 15
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Docker Buildx Setup ──────────────────────────────────────────────
+      # Buildx enables advanced features: layer caching, multi-platform
+      # builds, and improved build performance via BuildKit.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── Registry Authentication ──────────────────────────────────────────
+      # Uses the official docker/login-action which supports Docker Hub,
+      # GHCR, GCR, ECR, ACR, and any OCI-compliant registry.
+      # Credentials are injected from GitHub Secrets — never hardcoded.
+      - name: Log in to container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.REGISTRY_URL }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      # ── Image Metadata ──────────────────────────────────────────────────
+      # Generates consistent, informative tags:
+      #   • `latest`             – rolling tag for the most recent main build
+      #   • `sha-<short_hash>`   – immutable tag tied to the exact commit
+      # Labels include repo URL, commit SHA, and build timestamp for
+      # traceability in any registry UI.
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.REGISTRY_URL }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-,format=short
+
+      # ── Build & Push ─────────────────────────────────────────────────────
+      # Builds the multi-stage Dockerfile and pushes all generated tags.
+      # GitHub Actions cache is used to speed up layer rebuilds.
+      # Provenance is disabled to avoid compatibility issues with some
+      # registries (e.g. older ECR, Docker Hub manifest lists).
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+
+      # ── Build Summary ───────────────────────────────────────────────────
+      # Prints the pushed image tags to the GitHub Actions job summary
+      # for easy reference in the Actions UI.
+      - name: Print image tags
+        run: |
+          echo "### 🐳 Docker Image Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY

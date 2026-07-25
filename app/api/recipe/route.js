@@ -1,10 +1,36 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
+import { applyRateLimit } from '@/lib/rate-limit';
+import { createLogger } from '@/lib/logger';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 
+// ── Structured Logger ──────────────────────────────────────────────────────
+const log = createLogger('api:recipe');
+
 export async function GET(request) {
+  // ── Rate Limiting ────────────────────────────────────────────────────────
+  try {
+    const { success, limit, remaining, reset } = await applyRateLimit(request);
+    if (!success) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please slow down.' },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(Math.ceil((reset - Date.now()) / 1000)),
+            'X-RateLimit-Limit': String(limit),
+            'X-RateLimit-Remaining': '0',
+          },
+        }
+      );
+    }
+  } catch (rateLimitError) {
+    // If Redis is unreachable, log and proceed (fail-open).
+    log.warn({ err: rateLimitError }, 'Rate limiter unavailable — proceeding without limit');
+  }
+
   const searchParams = request.nextUrl.searchParams;
   const query = searchParams.get('q');
   const dietary = searchParams.get('dietary') || 'None';
@@ -15,6 +41,8 @@ export async function GET(request) {
   }
 
   try {
+    log.info({ query, dietary, allergies }, 'Recipe search started');
+
     // Execute YouTube and Gemini requests concurrently
     const [youtubeResult, recipeResult] = await Promise.allSettled([
       fetchYouTubeVideos(query),
@@ -30,33 +58,36 @@ export async function GET(request) {
     if (youtubeResult.status === 'fulfilled') {
       responseData.videos = youtubeResult.value;
     } else {
-      console.error('YouTube API Error:', youtubeResult.reason);
+      log.error({ err: youtubeResult.reason, query }, 'YouTube API call failed');
       responseData.errors.push('Failed to fetch videos');
     }
 
     if (recipeResult.status === 'fulfilled') {
       responseData.recipe = recipeResult.value;
     } else {
-      console.error('LLM API Error:', recipeResult.reason);
+      log.error({ err: recipeResult.reason, query }, 'Gemini API call failed');
       responseData.errors.push('Failed to generate recipe');
     }
 
     if (!responseData.videos.length && !responseData.recipe) {
+      log.error({ query }, 'Both YouTube and Gemini failed — returning 500');
       return NextResponse.json({ error: 'Failed to retrieve any data. Please try again.' }, { status: 500 });
     }
 
     return NextResponse.json(responseData);
   } catch (error) {
-    console.error('API Route Error:', error);
+    log.error({ err: error }, 'Unhandled error in recipe route');
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
 
 async function fetchYouTubeVideos(query) {
   if (!YOUTUBE_API_KEY || YOUTUBE_API_KEY === 'your_youtube_api_key_here') {
-    console.warn('YOUTUBE_API_KEY is not set or invalid. Returning mock videos.');
+    log.warn('YOUTUBE_API_KEY not set — returning mock videos');
     return getMockVideos(query);
   }
+
+  const startTime = performance.now();
 
   const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=3&q=${encodeURIComponent(query + ' cooking recipe')}&type=video&videoEmbeddable=true&key=${YOUTUBE_API_KEY}`;
   
@@ -67,7 +98,13 @@ async function fetchYouTubeVideos(query) {
   }
 
   const data = await response.json();
-  
+  const durationMs = Math.round(performance.now() - startTime);
+
+  log.info(
+    { durationMs, resultCount: data.items?.length ?? 0, query },
+    'YouTube API call completed'
+  );
+
   return data.items.map(item => ({
     videoId: item.id.videoId,
     title: item.snippet.title,
@@ -77,10 +114,17 @@ async function fetchYouTubeVideos(query) {
 }
 
 async function generateRecipe(query, dietary, allergies) {
+  log.debug(
+    { hasApiKey: !!process.env.GEMINI_API_KEY, query, dietary, allergies },
+    'generateRecipe called'
+  );
+
   if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'your_gemini_api_key_here') {
-    console.warn('GEMINI_API_KEY is not set or invalid. Returning mock recipe.');
+    log.warn('GEMINI_API_KEY not set — returning mock recipe');
     return getMockRecipe(query);
   }
+
+  const startTime = performance.now();
 
   const prompt = `You are an expert culinary architect and supply chain mapper. Your job is to take a user's food query and output a STRICT JSON object representing the recipe.
 
@@ -118,13 +162,38 @@ Dish to generate: "${query}"`;
       }
     });
 
+    const durationMs = Math.round(performance.now() - startTime);
+
+    // ── Telemetry: Log Gemini latency and token usage ─────────────────────
+    // Extract token counts from the response metadata (if available).
+    // These are fire-and-forget — they don't block the response.
+    const usageMetadata = response.usageMetadata || {};
+    log.info(
+      {
+        durationMs,
+        model: 'gemini-2.5-flash',
+        query,
+        promptTokens: usageMetadata.promptTokenCount ?? null,
+        completionTokens: usageMetadata.candidatesTokenCount ?? null,
+        totalTokens: usageMetadata.totalTokenCount ?? null,
+      },
+      'Gemini API call completed'
+    );
+
     let jsonStr = response.text;
+    log.debug({ responseLength: jsonStr?.length }, 'Raw Gemini response received');
     
     // Fallback sanitation just in case the model ignored responseMimeType
     jsonStr = jsonStr.replace(/```json/gi, '').replace(/```/g, '').trim();
     
-    return JSON.parse(jsonStr);
+    const parsed = JSON.parse(jsonStr);
+    return parsed;
   } catch (error) {
+    const durationMs = Math.round(performance.now() - startTime);
+    log.error(
+      { err: error, durationMs, model: 'gemini-2.5-flash', query },
+      'Gemini API call failed'
+    );
     throw new Error(`Gemini API Error: ${error.message}`);
   }
 }
